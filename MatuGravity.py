@@ -2,15 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════╗
-║   Ⓜ MATUGRAVITY v3.0                                     ║
+║   Ⓜ MATUGRAVITY v3.0.1 (UTF-8 Hotfix)                   ║
 ║                                                          ║
 ║   ▸ DeepSeekAPI    — api.deepseek.com                    ║
 ║   ▸ GrokAPI        — api.x.ai                            ║
 ║   ▸ ClaudeAPI      — api.anthropic.com                   ║
 ║   ▸ GeminiAPI      — generativelanguage.googleapis.com   ║
-║                                                          ║
-║   Her sağlayıcının KENDİ API sınıfı vardır.              ║
-║   SDK yok, uygulama yok — saf requests.                  ║
 ╚══════════════════════════════════════════════════════════╝
 """
 import os, re, sys, json, subprocess, io
@@ -18,24 +15,21 @@ from pathlib import Path
 from datetime import datetime
 import requests
 
-# ════════════════════════ UTF-8 VE KONSOL SORUNU ÇÖZÜMÜ ════════════════════════
+# ════════════════════════ KARAKTER SORUNU KÖKTEN ÇÖZÜM ════════════════════════
 if sys.platform == "win32":
     try:
         import ctypes
-        # Windows konsolunu UTF-8 (65001) kodlamasına zorla
         ctypes.windll.kernel32.SetConsoleOutputCP(65001)
         ctypes.windll.kernel32.SetConsoleCP(65001)
     except Exception:
         pass
 
+# Python'un stdout akışını tamamen UTF-8'e kilitle (Ä±, Ã¼, Å bozulmalarını engeller)
 try:
-    # Standart çıktıyı UTF-8 olarak yapılandır
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 except Exception:
-    # Eski Python sürümleri veya PyInstaller için yedek çözüm
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    pass
 
 
 # ════════════════════════ RENKLER & BANNER ════════════════════════
@@ -51,7 +45,7 @@ BANNER = f"""{C.CYN}{C.B}
   ██║╚██╔╝██║██╔══██║   ██║   ██║   ██║╚██╗ ██╔╝
   ██║ ╚═╝ ██║██║  ██║   ██║    ╚██████╔╝ ╚████╔╝
   ╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝     ╚═════╝   ╚═══╝{C.R}{C.B} G R A V I T Y{C.R}
-  {C.DIM}─ v3.0 · 4 API · 4 Model Ailesi · Agentic ─{C.R}"""
+  {C.DIM}─ v3.0.1 · UTF-8 Hotfix · 4 API · 4 Model Ailesi ─{C.R}"""
 
 WORKSPACE = Path("./matu_workspace")
 KEYS_FILE = Path("keys.json")
@@ -121,9 +115,18 @@ def gizle(metin,key):
     return m
 
 def sse_akis(resp):
-    """Server-Sent Events → JSON parçaları."""
-    for satir in resp.iter_lines(decode_unicode=True):
-        if not satir or not satir.startswith("data:"): continue
+    """Server-Sent Events → JSON parçaları (Manuel UTF-8 Çözümleyici)"""
+    for satir in resp.iter_lines():
+        if not satir: continue
+        
+        # Requests'in otomatik charset çözümlemesine güvenmiyoruz,
+        # doğrudan UTF-8 olarak decode ediyoruz (Bozuk harf sorununu çözer).
+        try:
+            satir = satir.decode('utf-8')
+        except UnicodeDecodeError:
+            continue
+            
+        if not satir.startswith("data:"): continue
         veri=satir[5:].strip()
         if veri=="[DONE]": return
         try: yield json.loads(veri)
@@ -139,10 +142,17 @@ def alternatif_bul(govde,mevcut):
 
 def hata_goster(e,key="",govde=None):
     det=getattr(e,"response",None)
-    raw=(det.text[:300] if det is not None else "") or (govde or "")
+    raw=""
+    if det is not None:
+        try:
+            raw = det.content.decode('utf-8', errors='replace')[:300]
+        except Exception:
+            raw = str(det.text[:300])
+    elif govde:
+        raw = govde
+        
     renk(f"\n✖ API hatası: {gizle(str(e),key)}",C.RED)
-    if raw and not govde: renk(gizle(raw,key),C.DIM)
-    elif raw: renk(gizle(raw,key),C.DIM)
+    if raw: renk(gizle(raw,key),C.DIM)
 
 
 # ════════════════════════════════════════════════════════════════════
