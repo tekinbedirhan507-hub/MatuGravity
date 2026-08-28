@@ -13,14 +13,29 @@
 ║   SDK yok, uygulama yok — saf requests.                  ║
 ╚══════════════════════════════════════════════════════════╝
 """
-import os, re, sys, json, subprocess
+import os, re, sys, json, subprocess, io
 from pathlib import Path
 from datetime import datetime
 import requests
 
-os.system("")                                   # Windows ANSI aç
-try: sys.stdout.reconfigure(encoding="utf-8")   # Türkçe karakterler
-except Exception: pass
+# ════════════════════════ UTF-8 VE KONSOL SORUNU ÇÖZÜMÜ ════════════════════════
+if sys.platform == "win32":
+    try:
+        import ctypes
+        # Windows konsolunu UTF-8 (65001) kodlamasına zorla
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+    except Exception:
+        pass
+
+try:
+    # Standart çıktıyı UTF-8 olarak yapılandır
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    # Eski Python sürümleri veya PyInstaller için yedek çözüm
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 
 # ════════════════════════ RENKLER & BANNER ════════════════════════
@@ -129,24 +144,9 @@ def hata_goster(e,key="",govde=None):
     if raw and not govde: renk(gizle(raw,key),C.DIM)
     elif raw: renk(gizle(raw,key),C.DIM)
 
-def gem_dene_gec(sag,fn,model,mx,temp,_derin):
-    """404 yakalarsa sunucunun önerdiği modele geçip yeniden dener."""
-    try: return fn()
-    except requests.HTTPError as e:
-        resp=getattr(e,"response",None)
-        if resp is not None and resp.status_code==404 and _derin<2:
-            alt=alternatif_bul(resp.text,model)
-            if alt:
-                renk(f"\n🔁 '{model}' bulunamadı → '{alt}' deneniyor…",C.YLW)
-                sag.yeni_model=alt
-                yield from sag.akis_genel(alt,mx,temp,_derin+1); return
-        raise
-
 
 # ════════════════════════════════════════════════════════════════════
 #                        D E E P S E E K   A P I
-#            https://api.deepseek.com/chat/completions
-#         OpenAI uyumlu · reasoning_content · Bearer auth
 # ════════════════════════════════════════════════════════════════════
 class DeepSeekAPI:
     ad = "DeepSeek"
@@ -156,12 +156,11 @@ class DeepSeekAPI:
         self.key=""; self.yeni_model=None
 
     def akis(self,gecmis,model,mx,temp):
-        """yield ('metin'|'dusun'|'bitti', içerik)"""
         self.yeni_model=None
         mesaj=[{"role":"system","content":SYSTEM_PROMPT}]+gecmis
         govde={"model":model,"messages":mesaj,
                "max_tokens":mx,"stream":True}
-        if "reasoner" not in model:          # reasoner temp kabul etmez
+        if "reasoner" not in model:
             govde["temperature"]=temp
         try:
             r=requests.post(self.URL,stream=True,timeout=900,json=govde,
@@ -180,7 +179,7 @@ class DeepSeekAPI:
             for j in sse_akis(r):
                 ch=(j.get("choices") or [{}])[0]
                 d=ch.get("delta") or {}
-                if d.get("reasoning_content"):          # R1 düşünme süreci
+                if d.get("reasoning_content"):
                     yield("dusun",d["reasoning_content"])
                 if d.get("content"):
                     yield("metin",d["content"])
@@ -192,8 +191,6 @@ class DeepSeekAPI:
 
 # ════════════════════════════════════════════════════════════════════
 #                           G R O K   A P I
-#               https://api.x.ai/v1/chat/completions
-#      OpenAI uyumlu · grok-4 system mesajını desteklemez → gömeriz
 # ════════════════════════════════════════════════════════════════════
 class GrokAPI:
     ad = "Grok"
@@ -205,7 +202,7 @@ class GrokAPI:
     def akis(self,gecmis,model,mx,temp):
         self.yeni_model=None
         mesaj=[{"role":"system","content":SYSTEM_PROMPT}]+gecmis
-        if model.startswith("grok-4"):       # system yok → ilk user'a ekle
+        if model.startswith("grok-4"):
             st=""; kalan=[]
             for m in mesaj:
                 if m["role"]=="system": st+=m["content"]+"\n"
@@ -240,8 +237,6 @@ class GrokAPI:
 
 # ════════════════════════════════════════════════════════════════════
 #                        C L A U D E   A P I
-#             https://api.anthropic.com/v1/messages
-#   Anthropic Messages · x-api-key header · anthropic-version zorunlu
 # ════════════════════════════════════════════════════════════════════
 class ClaudeAPI:
     ad = "Claude"
@@ -282,8 +277,6 @@ class ClaudeAPI:
 
 # ════════════════════════════════════════════════════════════════════
 #                        G E M I N I   A P I
-#     generativelanguage.googleapis.com · key= query parametresi
-#   + CANLI MODEL LİSTESİ (sunucudan çekme) — emeklilere son!
 # ════════════════════════════════════════════════════════════════════
 class GeminiAPI:
     ad = "Gemini"
@@ -293,7 +286,6 @@ class GeminiAPI:
         self.key=""; self.yeni_model=None
 
     def canli_liste(self):
-        """Sunucuda ŞU AN yaşayan modelleri getir."""
         try:
             r=requests.get(self.BASE,params={"key":self.key,"pageSize":200},timeout=30)
             r.raise_for_status()
@@ -335,7 +327,7 @@ class GeminiAPI:
                     for p in cand.get("content",{}).get("parts",[]):
                         if p.get("text"): yield("metin",p["text"])
                     fr=cand.get("finishReason")
-                    if fr and fr!="STOP": pass           # devam
+                    if fr and fr!="STOP": pass
                     if fr: yield("bitti",fr); return
                 except (KeyError,IndexError): continue
         except requests.RequestException as e: hata_goster(e,self.key)
@@ -554,7 +546,6 @@ def ana():
             else: renk("Bilinmeyen komut → /yardim",C.RED)
             continue
 
-        # ── Normal mesaj ──
         dur["gecmis"].append({"role":"user","content":soru})
         while dur["gecmis"] and dur["gecmis"][0]["role"]!="user": dur["gecmis"].pop(0)
         if len(dur["gecmis"])>MAX_GECMIS: dur["gecmis"]=dur["gecmis"][-MAX_GECMIS:]
