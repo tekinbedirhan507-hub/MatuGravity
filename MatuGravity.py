@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ╔══════════════════════════════════════════════════════════╗
-║   Ⓜ MATUGRAVITY v3.0.1 (UTF-8 Hotfix)                   ║
+║   Ⓜ MATUGRAVITY v1.0.5 (UTF-8 Hotfix)                   ║
 ║                                                          ║
 ║   ▸ DeepSeekAPI    — api.deepseek.com                    ║
 ║   ▸ GrokAPI        — api.x.ai                            ║
